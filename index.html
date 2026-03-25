@@ -2,192 +2,125 @@
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
-    <title>3D Tablet Okuyucu</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Kitap Okuyucu</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/page-flip/dist/js/page-flip.browser.js"></script>
+    
     <style>
-        body {
-            background-color: #1a1a1a;
-            margin: 0;
-            padding: 0;
-            overflow: auto;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        body { background-color: #1a1a1a; margin: 0; font-family: sans-serif; color: white; overflow: auto; }
+        
+        /* ÜST MENÜ - HER KOŞULDA GÖRÜNÜR */
+        #menu {
+            position: fixed; top: 0; left: 0; width: 100%; height: 60px;
+            background: #333; display: flex; align-items: center; 
+            justify-content: center; gap: 10px; z-index: 9999;
+            border-bottom: 2px solid #444;
         }
 
-        /* --- MENÜ ÇUBUĞU (KESİN GÖRÜNÜR HALE GETİRİLDİ) --- */
-        #toolbar {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 60px;
-            background: #2c2c2c;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 15px;
-            z-index: 9999;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
-            padding: 0 10px;
+        button {
+            padding: 10px 15px; border: none; border-radius: 5px;
+            font-weight: bold; cursor: pointer; color: white;
         }
+        .btn-open { background: #4CAF50; }
+        .btn-tool { background: #2196F3; }
 
-        .toolbar-btn {
-            background: #4CAF50;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 5px;
-            font-weight: bold;
-            cursor: pointer;
-            font-size: 14px;
-            white-space: nowrap;
-        }
-
-        .btn-mode { background: #9C27B0; }
-        .btn-zoom { background: #2196F3; min-width: 40px; }
-        .btn-theme { background: #607D8B; }
-
-        #pdf-upload { display: none; }
-
-        /* --- İÇERİK ALANI --- */
-        #physical-box {
-            margin-top: 80px; /* Menüden aşağı indirir */
-            position: relative;
-            display: flex;
-            justify-content: center;
-        }
-
-        #main-container {
-            transform-origin: top center;
-            transition: transform 0.2s;
-        }
-
-        .flip-book { box-shadow: 0 0 50px rgba(0,0,0,0.7); display: none; }
-        .page { background: white; display: flex; justify-content: center; align-items: center; }
+        /* KİTAP ALANI */
+        #content { margin-top: 80px; display: flex; justify-content: center; }
+        #container { transform-origin: top center; transition: transform 0.2s; }
+        .flip-book { background: #fff; box-shadow: 0 0 20px #000; display: none; }
+        .page { background: white; display: flex; justify-content: center; align-items: center; border: 1px solid #ddd; }
         canvas { width: 100%; height: 100%; object-fit: contain; }
 
-        #loading-text {
-            position: fixed; top: 70px; left: 50%; transform: translateX(-50%);
-            background: rgba(0,0,0,0.8); color: white; padding: 10px 20px;
-            border-radius: 20px; z-index: 1000; display: none;
-        }
-
-        #zoom-indicator {
-            position: fixed; bottom: 20px; right: 20px;
-            background: rgba(0,0,0,0.6); color: white; padding: 5px 12px;
-            border-radius: 15px; font-size: 12px; z-index: 1000;
-        }
+        #info { position: fixed; bottom: 10px; right: 10px; background: rgba(0,0,0,0.5); padding: 5px 10px; border-radius: 10px; }
     </style>
 </head>
 <body>
 
-    <div id="toolbar">
-        <input type="file" id="pdf-upload" accept="application/pdf">
-        <button class="toolbar-btn" onclick="document.getElementById('pdf-upload').click()">📂 PDF AÇ</button>
-        <button class="toolbar-btn btn-mode" onclick="togglePageMode()">📖 MOD DEĞİŞTİR</button>
-        <button class="toolbar-btn btn-zoom" onclick="zoomOut()">-</button>
-        <button class="toolbar-btn btn-zoom" onclick="zoomIn()">+</button>
-        <button class="toolbar-btn btn-theme" onclick="toggleTheme()" id="theme-label">🌙</button>
+    <div id="menu">
+        <input type="file" id="pdf-file" accept="application/pdf" style="display:none">
+        <button class="btn-open" onclick="document.getElementById('pdf-file').click()">📂 PDF SEÇ</button>
+        <button class="btn-tool" onclick="toggleMode()">📖 MOD</button>
+        <button class="btn-tool" onclick="zoomOut()">-</button>
+        <button class="btn-tool" onclick="zoomIn()">+</button>
     </div>
 
-    <div id="loading-text">İşleniyor...</div>
-    <div id="zoom-indicator">Zoom: %100</div>
-    
-    <div id="physical-box">
-        <div id="main-container"></div>
+    <div id="content">
+        <div id="container">
+            <div id="book" class="flip-book"></div>
+        </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/page-flip/dist/js/page-flip.browser.js"></script>
+    <div id="info">Zoom: <span id="z-val">110</span>%</div>
 
     <script>
+        // PDF Worker Ayarı
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
-        let pageFlip = null;
-        let currentZoom = 1.0; 
-        let isSinglePage = true; 
-        let canvasCache = []; 
-        let currentPageIndex = 0;
+        let book = null;
+        let zoom = 1.1;
+        let single = true;
+        let pages = [];
 
-        document.getElementById('pdf-upload').addEventListener('change', function(e) {
+        // Dosya Seçme
+        document.getElementById('pdf-file').onchange = function(e) {
             const file = e.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = function(ev) {
-                    const data = atob(ev.target.result.split(',')[1]);
-                    loadPdf(data);
-                };
-                reader.readAsDataURL(file);
-            }
-        });
+            const reader = new FileReader();
+            reader.onload = function() { loadPdf(this.result); };
+            reader.readAsArrayBuffer(file);
+        };
 
-        async function loadPdf(pdfData) {
-            const loading = document.getElementById('loading-text');
-            loading.style.display = 'block';
-            try {
-                const pdf = await pdfjsLib.getDocument({data: pdfData}).promise;
-                canvasCache = [];
-                for (let i = 1; i <= pdf.numPages; i++) {
-                    const page = await pdf.getPage(i);
-                    const viewport = page.getViewport({scale: 2});
-                    const canvas = document.createElement('canvas');
-                    const ctx = canvas.getContext('2d');
-                    canvas.height = viewport.height;
-                    canvas.width = viewport.width;
-                    await page.render({canvasContext: ctx, viewport: viewport}).promise;
-                    canvasCache.push(canvas);
-                    loading.innerText = `Yükleniyor: ${i}/${pdf.numPages}`;
-                }
-                loading.style.display = 'none';
-                renderBook();
-            } catch (err) { alert("Hata: " + err.message); }
+        async function loadPdf(data) {
+            document.getElementById('menu').style.opacity = "0.5";
+            const pdf = await pdfjsLib.getDocument({data: data}).promise;
+            pages = [];
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const pg = await pdf.getPage(i);
+                const vp = pg.getViewport({scale: 2});
+                const cvs = document.createElement('canvas');
+                cvs.width = vp.width; cvs.height = vp.height;
+                await pg.render({canvasContext: cvs.getContext('2d'), viewport: vp}).promise;
+                pages.push(cvs);
+            }
+            document.getElementById('menu').style.opacity = "1";
+            render();
         }
 
-        function renderBook() {
-            const container = document.getElementById('main-container');
-            if (pageFlip) pageFlip.destroy();
-            container.innerHTML = '<div id="book" class="flip-book"></div>';
-            const bookDiv = document.getElementById('book');
-
-            canvasCache.forEach(cvs => {
-                const pg = document.createElement('div');
-                pg.className = 'page';
-                pg.appendChild(cvs);
-                bookDiv.appendChild(pg);
+        function render() {
+            if (book) book.destroy();
+            const bDiv = document.getElementById('book');
+            bDiv.innerHTML = '';
+            pages.forEach(p => {
+                const d = document.createElement('div');
+                d.className = 'page';
+                d.appendChild(p);
+                bDiv.appendChild(d);
             });
-
-            bookDiv.style.display = 'block';
+            bDiv.style.display = "block";
             
-            const settings = isSinglePage ? 
-                { width: 600, height: 850, size: "stretch", usePortrait: true, showCover: false } :
-                { width: 500, height: 700, size: "stretch", usePortrait: false, showCover: true };
-
-            pageFlip = new St.PageFlip(bookDiv, settings);
-            pageFlip.loadFromHTML(document.querySelectorAll('.page'));
-            updateZoom();
+            book = new St.PageFlip(bDiv, {
+                width: single ? 600 : 450,
+                height: single ? 850 : 636,
+                size: "stretch",
+                usePortrait: single,
+                showCover: !single
+            });
+            book.loadFromHTML(document.querySelectorAll('.page'));
+            update();
         }
 
-        function updateZoom() {
-            const mc = document.getElementById('main-container');
-            const pb = document.getElementById('physical-box');
-            mc.style.transform = `scale(${currentZoom})`;
-            pb.style.height = (mc.offsetHeight * currentZoom) + "px";
-            pb.style.width = (mc.offsetWidth * currentZoom) + "px";
-            document.getElementById('zoom-indicator').innerText = `Zoom: %${Math.round(currentZoom*100)}`;
+        function update() {
+            const c = document.getElementById('container');
+            c.style.transform = `scale(${zoom})`;
+            document.getElementById('z-val').innerText = Math.round(zoom * 100);
+            
+            // Kaydırma için boyut güncelleme
+            document.getElementById('content').style.height = (c.offsetHeight * zoom + 100) + "px";
         }
 
-        function zoomIn() { currentZoom += 0.1; updateZoom(); }
-        function zoomOut() { if(currentZoom > 0.5) currentZoom -= 0.1; updateZoom(); }
-        function togglePageMode() { isSinglePage = !isSinglePage; renderBook(); }
-        function toggleTheme() {
-            const body = document.body;
-            if(body.style.backgroundColor === 'white') {
-                body.style.backgroundColor = '#1a1a1a';
-                document.getElementById('theme-label').innerText = '🌙';
-            } else {
-                body.style.backgroundColor = 'white';
-                document.getElementById('theme-label').innerText = '☀️';
-            }
-        }
+        function zoomIn() { zoom += 0.1; update(); }
+        function zoomOut() { if(zoom > 0.5) zoom -= 0.1; update(); }
+        function toggleMode() { single = !single; render(); }
     </script>
 </body>
 </html>
