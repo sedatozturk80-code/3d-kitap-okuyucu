@@ -1,0 +1,18 @@
+{
+  "short_name": "3D Kitap",
+  "name": "3D Tablet E-Kitap Okuyucu",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3389/3389081.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "./index.html",
+  "background_color": "#3c3f41",
+  "display": "standalone",
+  "scope": "./",
+  "theme_color": "#3c3f41",
+  "description": "3D Sayfa Çevirme Efektli PDF Okuyucu"
+}
