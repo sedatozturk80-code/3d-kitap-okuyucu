@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>3D PDF Okuyucu Pro</title>
+    <style>
+        body {
+            background-color: #3c3f41;
+            margin: 0;
+            overflow: auto; /* Kaydırma çubukları için zorunlu */
+            font-family: Arial, sans-serif;
+        }
+
+        #loading-text {
+            color: #ffffff;
+            font-size: 20px;
+            display: none;
+            position: fixed; 
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+            background: rgba(0,0,0,0.8);
+            padding: 15px 30px;
+            border-radius: 8px;
+        }
+        
+        #zoom-indicator {
+            position: fixed; 
+            top: 20px;
+            right: 20px;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+            z-index: 100;
+            pointer-events: none; 
+        }
+
+        /* YENİ: Tarayıcıyı kaydırma çubuğu çıkarmaya zorlayan fiziksel kafes */
+        #physical-box {
+            position: relative;
+            transition: width 0.15s ease-out, height 0.15s ease-out, margin 0.15s ease-out;
+        }
+
+        /* ESKİ KUSURSUZ KOD: Kitap sadece görsel olarak büyür, iç yapısı asla bozulmaz */
+        #main-container {
+            transform-origin: top left; /* Tam sol üstten büyür ki kafese tam otursun */
+            transition: transform 0.15s ease-out; 
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .flip-book {
+            box-shadow: 0 0 30px rgba(0,0,0,0.8);
+            display: none;
+        }
+        
+        .page {
+            background-color: white;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: cover; 
+        }
+    </style>
+</head>
+<body>
+
+    <div id="loading-text">PDF İşleniyor, Sayfalar Oluşturuluyor...</div>
+    <div id="zoom-indicator">Zoom: %110</div>
+    
+    <div id="physical-box">
+        <div id="main-container"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/page-flip/dist/js/page-flip.browser.js"></script>
+
+    <script>
+        let pageFlip = null;
+        let currentZoom = 1.1; 
+        let isSinglePage = true; 
+        let canvasCache = []; 
+        let currentPageIndex = 0; 
+
+        // YENİ VE KUSURSUZ ZOOM ALGORİTMASI
+        function updateZoomDisplay() {
+            const zoomPercent = Math.round(currentZoom * 100);
+            document.getElementById('zoom-indicator').innerText = `Zoom: %${zoomPercent}`;
+            
+            const mainContainer = document.getElementById('main-container');
+            const physicalBox = document.getElementById('physical-box');
+
+            // 1. O kusursuz görsel büyütmeyi uygula
+            mainContainer.style.transform = `scale(${currentZoom})`;
+            
+            // 2. Kitabın orijinal (büyümemiş) piksel boyutunu al
+            const unscaledWidth = mainContainer.offsetWidth;
+            const unscaledHeight = mainContainer.offsetHeight;
+            
+            // 3. Zoom sonrası ekranda kaplayacağı devasa pikseli hesapla
+            const scaledWidth = unscaledWidth * currentZoom;
+            const scaledHeight = unscaledHeight * currentZoom;
+
+            // 4. Fiziksel kafesi bu devasa boyuta getir (Tarayıcı mecburen kaydırma çubuğu çıkaracak)
+            physicalBox.style.width = scaledWidth + "px";
+            physicalBox.style.height = scaledHeight + "px";
+
+            // 5. Kesilmeleri önlemek için mükemmel hizalama
+            if (scaledWidth < window.innerWidth) {
+                physicalBox.style.marginLeft = "auto";
+                physicalBox.style.marginRight = "auto";
+            } else {
+                physicalBox.style.marginLeft = "30px"; // Ekrana sığmadığında sol tarafa nefes alma boşluğu
+                physicalBox.style.marginRight = "30px";
+            }
+
+            if (scaledHeight < window.innerHeight) {
+                physicalBox.style.marginTop = ((window.innerHeight - scaledHeight) / 2) + "px";
+                physicalBox.style.marginBottom = "0px";
+            } else {
+                physicalBox.style.marginTop = "30px"; // Ekrana sığmadığında üst tarafa nefes alma boşluğu
+                physicalBox.style.marginBottom = "30px";
+            }
+        }
+
+        function zoomIn() {
+            if (currentZoom < 3.0) { 
+                currentZoom += 0.10; 
+                updateZoomDisplay();
+            }
+        }
+
+        function zoomOut() {
+            if (currentZoom > 0.3) { 
+                currentZoom -= 0.10;
+                updateZoomDisplay();
+            }
+        }
+
+        function setTheme(mode) {
+            if (mode === 'dark') {
+                document.body.style.backgroundColor = '#3c3f41';
+            } else {
+                document.body.style.backgroundColor = '#e0e0e0';
+            }
+        }
+
+        window.addEventListener('wheel', function(e) {
+            if (canvasCache.length > 0) {
+                if (e.ctrlKey) {
+                    e.preventDefault(); 
+                    if (e.deltaY < 0) {
+                        zoomIn(); 
+                    } else {
+                        zoomOut(); 
+                    }
+                }
+            }
+        }, { passive: false });
+
+        window.addEventListener('keydown', function(e) {
+            if (!pageFlip) return;
+            if (e.key === 'ArrowRight') {
+                pageFlip.flipNext();
+            } else if (e.key === 'ArrowLeft') {
+                pageFlip.flipPrev();
+            }
+        });
+
+        function togglePageMode() {
+            if (canvasCache.length === 0 || !pageFlip) return;
+            
+            currentPageIndex = pageFlip.getCurrentPageIndex();
+            isSinglePage = !isSinglePage;
+            
+            if (isSinglePage) {
+                currentZoom = 1.1; 
+            } else {
+                currentZoom = 0.8; 
+            }
+            
+            renderBook(); 
+        }
+
+        async function loadPdfFromBase64(base64Data) {
+            const loadingText = document.getElementById('loading-text');
+            loadingText.style.display = 'block';
+            
+            try {
+                const binaryString = window.atob(base64Data);
+                const len = binaryString.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) { bytes[i] = binaryString.charCodeAt(i); }
+
+                const loadingTask = pdfjsLib.getDocument({data: bytes});
+                const pdf = await loadingTask.promise;
+                
+                canvasCache = []; 
+                currentPageIndex = 0; 
+
+                for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                    const page = await pdf.getPage(pageNum);
+                    const viewport = page.getViewport({scale: 2.0}); 
+
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+
+                    await page.render({canvasContext: context, viewport: viewport}).promise;
+                    canvasCache.push(canvas); 
+                    
+                    loadingText.innerText = `İşleniyor: Sayfa ${pageNum} / ${pdf.numPages}`;
+                }
+
+                loadingText.style.display = 'none';
+                
+                isSinglePage = true; 
+                currentZoom = 1.1; 
+                
+                renderBook(); 
+
+            } catch (error) {
+                loadingText.innerText = "Hata Oluştu: " + error.message;
+            }
+        }
+
+        function renderBook() {
+            const mainContainer = document.getElementById('main-container');
+
+            if (pageFlip) { 
+                try { pageFlip.destroy(); } catch(e) {}
+                pageFlip = null;
+            }
+            
+            mainContainer.innerHTML = ''; 
+            let newBook = document.createElement('div');
+            newBook.id = 'book';
+            newBook.className = 'flip-book';
+            mainContainer.appendChild(newBook);
+
+            canvasCache.forEach(originalCanvas => {
+                const pageDiv = document.createElement('div');
+                pageDiv.className = 'page';
+                pageDiv.appendChild(originalCanvas); 
+                newBook.appendChild(pageDiv);
+            });
+
+            newBook.style.display = 'block';
+
+            // O ÇOK SEVDİĞİN KUSURSUZ TASARIM AYARLARI GERİ DÖNDÜ
+            if (isSinglePage) {
+                mainContainer.style.width = "auto";
+                mainContainer.style.height = "90vh"; 
+                mainContainer.style.aspectRatio = "1 / 1.414"; 
+                
+                pageFlip = new St.PageFlip(document.getElementById('book'), {
+                    width: 600,        
+                    height: 848,       
+                    size: "stretch",   
+                    minWidth: 300,
+                    maxWidth: 1500,
+                    minHeight: 400,
+                    maxHeight: 2000,
+                    maxShadowOpacity: 0.3, 
+                    showCover: false, 
+                    usePortrait: true, 
+                    mobileScrollSupport: false
+                });
+            } else {
+                mainContainer.style.width = "90vw"; 
+                mainContainer.style.height = "auto"; 
+                mainContainer.style.aspectRatio = "1.414 / 1"; 
+                
+                pageFlip = new St.PageFlip(document.getElementById('book'), {
+                    width: 450,        
+                    height: 636,       
+                    size: "stretch",   
+                    minWidth: 300,
+                    maxWidth: 1500,
+                    minHeight: 400,
+                    maxHeight: 2000,
+                    maxShadowOpacity: 0.7, 
+                    showCover: true, 
+                    usePortrait: false, 
+                    mobileScrollSupport: false
+                });
+            }
+
+            pageFlip.loadFromHTML(document.querySelectorAll('.page'));
+            
+            if (currentPageIndex > 0) {
+                pageFlip.turnToPage(currentPageIndex);
+            }
+
+            // Tarayıcının kitabı tam çizmesine izin verip (100ms) zoom'u öyle ayarlıyoruz
+            setTimeout(() => {
+                updateZoomDisplay();
+            }, 100);
+        }
+    </script>
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js');
+  }
+</script>
+<link rel="manifest" href="./manifest.json">
+</body>
+</html>
