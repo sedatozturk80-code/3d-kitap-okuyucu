@@ -4,10 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     <title>3D Tablet E-Kitap Okuyucu</title>
+    
     <link rel="manifest" href="./manifest.json">
     <meta name="theme-color" content="#3c3f41">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3389/3389081.png">
-    
+
     <style>
         body {
             background-color: #3c3f41;
@@ -17,7 +18,7 @@
             transition: background-color 0.3s ease;
         }
 
-        /* ÜST MENÜ */
+        /* --- TABLET İÇİN YENİ YÜZEN MENÜ --- */
         #toolbar {
             position: fixed;
             top: 10px;
@@ -49,6 +50,7 @@
         .btn-zoom { background: #2196F3; }
         .btn-mode { background: #9C27B0; }
 
+        /* Gizli dosya seçici */
         #pdf-upload { display: none; }
 
         #loading-text {
@@ -67,7 +69,7 @@
         
         #zoom-indicator {
             position: fixed; 
-            top: 80px;
+            top: 80px; /* Menünün altına aldık */
             right: 20px;
             color: white;
             background-color: rgba(0, 0, 0, 0.7);
@@ -79,11 +81,10 @@
             pointer-events: none; 
         }
 
-        /* KAYDIRMA ÇUBUKLARI İÇİN FİZİKSEL KAFES */
         #physical-box {
             position: relative;
             transition: width 0.15s ease-out, height 0.15s ease-out, margin 0.15s ease-out;
-            margin-top: 80px; /* Menünün altından başlar */
+            margin-top: 80px; /* Üst menü kitabı kapatmasın diye boşluk */
         }
 
         #main-container {
@@ -136,7 +137,7 @@
     <script src="https://cdn.jsdelivr.net/npm/page-flip/dist/js/page-flip.browser.js"></script>
 
     <script>
-        // PWA Servis Kaydı (İnternetsiz çalışma ve uygulama özellikleri için)
+        // PWA (İnternetsiz çalışma ve uygulama özellikleri)
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./sw.js');
         }
@@ -148,7 +149,7 @@
         let currentPageIndex = 0; 
         let isDarkMode = true;
 
-        // BROWSER İÇİNDEN PDF SEÇME
+        // BROWSER (TABLET) İÇİNDEN PDF SEÇME ALGORİTMASI
         document.getElementById('pdf-upload').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (file) {
@@ -161,7 +162,6 @@
             }
         });
 
-        // TEMA DEĞİŞTİRME
         function toggleTheme() {
             isDarkMode = !isDarkMode;
             const btn = document.getElementById('theme-btn');
@@ -174,7 +174,6 @@
             }
         }
 
-        // ZOOM GÜNCELLEME VE FİZİKSEL KUTU AYARI (KAYDIRMA İÇİN)
         function updateZoomDisplay() {
             const zoomPercent = Math.round(currentZoom * 100);
             document.getElementById('zoom-indicator').innerText = `Zoom: %${zoomPercent}`;
@@ -210,14 +209,21 @@
             if (currentZoom > 0.3) { currentZoom -= 0.10; updateZoomDisplay(); }
         }
 
-        // KLAVYE YÖN TUŞLARI İLE SAYFA ÇEVİRME
+        // KAZARA SİLDİĞİM TEKERLEK KODU (GERİ GELDİ)
+        window.addEventListener('wheel', function(e) {
+            if (canvasCache.length > 0 && e.ctrlKey) {
+                e.preventDefault(); 
+                if (e.deltaY < 0) zoomIn(); 
+                else zoomOut(); 
+            }
+        }, { passive: false });
+
         window.addEventListener('keydown', function(e) {
             if (!pageFlip) return;
             if (e.key === 'ArrowRight') pageFlip.flipNext();
             else if (e.key === 'ArrowLeft') pageFlip.flipPrev();
         });
 
-        // MOD DEĞİŞTİRME (TEK/ÇİFT SAYFA)
         function togglePageMode() {
             if (canvasCache.length === 0 || !pageFlip) return;
             currentPageIndex = pageFlip.getCurrentPageIndex();
@@ -226,7 +232,6 @@
             renderBook(); 
         }
 
-        // PDF İŞLEME VE CANVAS OLUŞTURMA
         async function loadPdfFromBase64(base64Data) {
             const loadingText = document.getElementById('loading-text');
             loadingText.style.display = 'block';
@@ -268,47 +273,50 @@
             }
         }
 
-        // KİTABI EKRANA ÇİZME VE PAGEFLIP AYARLARI
         function renderBook() {
             const mainContainer = document.getElementById('main-container');
 
             if (pageFlip) { try { pageFlip.destroy(); } catch(e) {} pageFlip = null; }
             
-            mainContainer.innerHTML = '<div id="book" class="flip-book"></div>';
-            const bookDiv = document.getElementById('book');
+            mainContainer.innerHTML = ''; 
+            let newBook = document.createElement('div');
+            newBook.id = 'book';
+            newBook.className = 'flip-book';
+            mainContainer.appendChild(newBook);
 
             canvasCache.forEach(originalCanvas => {
                 const pageDiv = document.createElement('div');
                 pageDiv.className = 'page';
                 pageDiv.appendChild(originalCanvas); 
-                bookDiv.appendChild(pageDiv);
+                newBook.appendChild(pageDiv);
             });
 
-            bookDiv.style.display = 'block';
+            newBook.style.display = 'block';
 
-            // TABLET VE DOKUNMATİK EKRAN İÇİN OPTİMİZE EDİLMİŞ AYARLAR
-            // "size: 'fixed'" ile ekran döndüğünde modun bozulması engellendi.
-            // "swipeDistance: 150" ile yakınlaştırma yaparken yanlışlıkla sayfa çevrilmesi engellendi.
-            const settings = isSinglePage ? 
-                { 
-                    width: 600, height: 848, size: "fixed", 
-                    minWidth: 300, maxWidth: 2000, minHeight: 400, maxHeight: 3000, 
-                    maxShadowOpacity: 0.3, showCover: false, usePortrait: true, 
-                    mobileScrollSupport: true, swipeDistance: 150 
-                } :
-                { 
-                    width: 450, height: 636, size: "fixed", 
-                    minWidth: 300, maxWidth: 2000, minHeight: 400, maxHeight: 3000, 
-                    maxShadowOpacity: 0.7, showCover: true, usePortrait: false, 
-                    mobileScrollSupport: true, swipeDistance: 150 
-                };
+            if (isSinglePage) {
+                mainContainer.style.width = "auto";
+                mainContainer.style.height = "85vh"; 
+                mainContainer.style.aspectRatio = "1 / 1.414"; 
+                
+                // İSTEDİĞİN DOKUNMATİK VE DÖNDÜRME (FIXED) AYARLARI EKLENDİ
+                pageFlip = new St.PageFlip(document.getElementById('book'), {
+                    width: 600, height: 848, size: "fixed", minWidth: 300, maxWidth: 2000, minHeight: 400, maxHeight: 3000, maxShadowOpacity: 0.3, showCover: false, usePortrait: true, mobileScrollSupport: true, swipeDistance: 150
+                });
+            } else {
+                mainContainer.style.width = "95vw"; 
+                mainContainer.style.height = "auto"; 
+                mainContainer.style.aspectRatio = "1.414 / 1"; 
+                
+                // İSTEDİĞİN DOKUNMATİK VE DÖNDÜRME (FIXED) AYARLARI EKLENDİ
+                pageFlip = new St.PageFlip(document.getElementById('book'), {
+                    width: 450, height: 636, size: "fixed", minWidth: 300, maxWidth: 2000, minHeight: 400, maxHeight: 3000, maxShadowOpacity: 0.7, showCover: true, usePortrait: false, mobileScrollSupport: true, swipeDistance: 150
+                });
+            }
 
-            pageFlip = new St.PageFlip(bookDiv, settings);
             pageFlip.loadFromHTML(document.querySelectorAll('.page'));
-            
             if (currentPageIndex > 0) pageFlip.turnToPage(currentPageIndex);
 
-            setTimeout(() => { updateZoomDisplay(); }, 150);
+            setTimeout(() => { updateZoomDisplay(); }, 100);
         }
     </script>
 </body>
